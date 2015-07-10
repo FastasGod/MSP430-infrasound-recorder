@@ -10,13 +10,19 @@
  
  currently ADC is on pin 1, tweak in prepareADC()
  
+ 7-7-15 light codes
  
+ green ->             writting to SD
+ solid red ->         program succesfully shut down
+ 1Hz blinking red ->  unrecovered error
  */
 //debug values
-#define DEBUG          false    //if it is false, can increase BUFFER_RAM to 256 and BUFFER_COUNT to 3
+#define DEBUG          true    //if it is false, can increase BUFFER_RAM to 256 and BUFFER_COUNT to 3
 #define WRITE_DEBUG    false
 #define TIMING_DEBUG   false
 #define INCLUDE_HEADER true
+#define READ_FROM_DIRECTORY true  //seems to cause RAM issues when true, keep false for most testing
+//lower BUFFER_RAM to 96 while testing this, raise to 196 when not testing 
 
 //Assigned Pins
 #define CS_PIN       8      //P1.6?      //MISO     also used by green LED
@@ -28,16 +34,18 @@
 
 
 //currently assumes sample size is 2 bytes
-#define BUFFER_RAM 192 //MUST be divisible by (Size of each sample) * (BUFFER_COUNT+1) * BUFFER_SIZE
+#define BUFFER_RAM 96 //MUST be divisible by (Size of each sample) * (BUFFER_COUNT+1) * BUFFER_SIZE
 #define BUFFER_COUNT 2
 #define BUFFER_SIZE BUFFER_RAM/(BUFFER_COUNT+1)
 
 
-#define ADC_SAMPLE_FREQUENCY 2 //Measured in KHz
+#define ADC_SAMPLE_FREQUENCY 1 //Measured in KHz
 
-#define MAX_FILE_NAME_SIZE 11
+#define FILE_PATH_SIZE 22
 #define NUM_SECTOR_WRITES 30 //This will have an affect on how frequentyly writes are finalized
 //may be a data loss concern
+
+#define LOG_FILES_LOCATION "LOGFILES"
 
 
 //BEGIN ADC read interrupt values  
@@ -52,7 +60,6 @@ long SDwritePosition = 0; //increment by 512 to find desired sector
 char SDwriteBuffer[BUFFER_SIZE];
 
 //may eventually change this to a String and adapt code
-char currentFileName[MAX_FILE_NAME_SIZE] = "LOG000.TXT"; //eventually should be set by reading a config file
 //or reading contents of SD card
 char currentFile = 0;
 boolean isFileOpen = false;
@@ -62,6 +69,11 @@ unsigned short int bw, br;//, i;
 long AccStringLength = 0;
 long fileSize = 0;
 
+#if READ_FROM_DIRECTORY
+  char currentFilePath[FILE_PATH_SIZE] = "LOGFILES/LOG00001.TXT";
+#else
+  char currentFilePath[13] = "LOG00000.TXT";
+#endif
 boolean collectData = false;
 
 #if TIMING_DEBUG
@@ -92,7 +104,17 @@ void setup()
     emptyBuffer(writeBuffer,i);
   }
   FatFs.begin(CS_PIN);
-
+  
+  #if READ_FROM_DIRECTORY
+    getNextFile();
+  #else
+    #if INCLUDE_HEADER
+    generateHeader();
+    #endif
+  #endif
+  
+  
+  
   setupPins();
   prepareADC();
   prepareADCTimer();
@@ -102,9 +124,6 @@ void setup()
   __enable_interrupt();
 
 
-  #if INCLUDE_HEADER
-    generateHeader();
-  #endif
 
 
 
@@ -117,12 +136,48 @@ void setup()
 
   
 }
-void generateHeader()
+//#if READ_FROM_DIRECTORY
+void getNextFile()
 {
-  //Consider 16 byte segments
-  /* FORMAT:
-    HEADER_SIZE= 2 bytes
-    BUFFER_SIZE= 2 bytes
+  //selects directory
+  //directory = 0;
+  DIR directory;
+  char rc = FatFs.opendir(&directory, LOG_FILES_LOCATION);
+  if(rc) recover(rc+80);
+  
+  FILINFO file;
+
+  rc = FatFs.readdir(&directory,&file);
+  if(rc) recover(rc+90);
+  
+  //TODO: actually use the file.fname to rename currentFilePath
+  //copies file name to current File Name
+  
+  
+  
+  //will later use this to change file name
+  /* JACOB TODO:
+    I am having trouble with the next bit of code
+    It should essentially be the same outside of the sketch, so you may
+    want to create your own sketch to test stuff
+    
+    what I need: 
+    1. I need to take a character arrayA of length 9
+    2. append a '/' character
+    3. append a character arrayB of length 13 to it
+    
+    ex:
+    arrayA = LOGFILES
+    arrayB = LOG00000.TXT
+    output LOGFILES/LOG00000.TXT
+  
+  //strcpy(currentFilePath, LOG_FILES_LOCATION);
+  //char forwardSlash[1] = {'/'};
+  //strcat(currentFilePath,(const char*)'////');
+  //strcat(currentFilePath,file.fname);
+
+  
+  //memcpy(currentFilePath,tString,strlen(tString));
   
   
   
@@ -130,84 +185,168 @@ void generateHeader()
   
   
   */
+  
+  SDwritePosition = 0;
+  currentWriteLength = 0;
+  
+  
+  #if INCLUDE_HEADER
+    generateHeader();
+  #endif
+  
+  #if DEBUG
+    Serial.println("Opening new file: ");
+    for(int i = 0; i < 22; i++)
+    {
+      Serial.println(currentFilePath[i]);
+    }
+    Serial.println(currentFilePath);
+  #endif
+}
+//#endif  //READ_FROM_DIRECTORY
+void generateHeader()
+{
+  //Consider 16 byte segments
+  /* FORMAT:
+    HEADER_SIZE= 2 bytes
+    BUFFER_SIZE= 2 bytes
+    
+  
+  
+  
+  
+  
+  */
+  
+  #if DEBUG
+    Serial.println("Entering generate header");
+  #endif
+  
+  
+  
   int HEADER_SIZE = 512;
   
-  for(int i = 0; i < BUFFER_SIZE;i++)
-  {
-    SDwriteBuffer[i] = '0';
-  }
-  
-  
-  //there is almost certainly a better way to do this, probably with strings
-  SDwriteBuffer[0]  = 'H';
-  SDwriteBuffer[1]  = 'E';
-  SDwriteBuffer[2]  = 'A';
-  SDwriteBuffer[3]  = 'D';
-  SDwriteBuffer[4]  = 'E';
-  SDwriteBuffer[5]  = 'R';
-  SDwriteBuffer[6]  = '_';
-  SDwriteBuffer[7]  = 'S';
-  SDwriteBuffer[8]  = 'I';
-  SDwriteBuffer[9]  = 'Z';
-  SDwriteBuffer[10] = 'E';
-  SDwriteBuffer[11] = '=';
-  SDwriteBuffer[12] = (HEADER_SIZE>>8) & 0xff;  //next 2 bytes are buffer Size
-  SDwriteBuffer[13] = (HEADER_SIZE>>0) & 0xff;
-  SDwriteBuffer[14] = '\r';
-  SDwriteBuffer[15] = '\n';
-  
-  
-  SDwriteBuffer[16] = 'B';
-  SDwriteBuffer[17] = 'U';
-  SDwriteBuffer[18] = 'F';
-  SDwriteBuffer[19] = 'F';
-  SDwriteBuffer[20] = 'E';
-  SDwriteBuffer[21] = 'R';
-  SDwriteBuffer[22] = '_';
-  SDwriteBuffer[23] = 'S';
-  SDwriteBuffer[24] = 'I';
-  SDwriteBuffer[25] = 'Z';
-  SDwriteBuffer[26] = 'E';
-  SDwriteBuffer[27] = '=';
-  SDwriteBuffer[28] = (BUFFER_SIZE>>8) & 0xff;  //next 2 bytes are buffer Size
-  SDwriteBuffer[29] = (BUFFER_SIZE>>0) & 0xff;
-  SDwriteBuffer[30] = '\r';
-  SDwriteBuffer[31] = '\n';
-  
-  
-  
-  
-  SDwriteBuffer[63] = '\n';
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  //writes
-  char FatFsReturnChar = FatFs.open(currentFileName);
-  if (FatFsReturnChar) recover(FatFsReturnChar);
+  char FatFsReturnChar = FatFs.open(currentFilePath);
+  if (FatFsReturnChar) recover(FatFsReturnChar+100);
   isFileOpen = true;
   bw = 0;
   FatFsReturnChar = FatFs.lseek(SDwritePosition);
   if (FatFsReturnChar) recover(FatFsReturnChar+10);
   
-  FatFsReturnChar = FatFs.write(SDwriteBuffer, BUFFER_SIZE,&bw);
-  if (FatFsReturnChar) recover(FatFsReturnChar+20);
-  currentWriteLength += BUFFER_SIZE;
-    
+  
+  
+  
+  int i = 0;
+  
+  if(i+16 > BUFFER_SIZE)
+  {
+    for(i = 0; i < BUFFER_SIZE;i++)
+    {
+      SDwriteBuffer[i] = '0';
+    }
+  }
+  
+  //there is almost certainly a better way to do this, probably with strings
+  SDwriteBuffer[i+0]  = 'B';
+  SDwriteBuffer[i+1]  = 'U';
+  SDwriteBuffer[i+2]  = 'Y';
+  SDwriteBuffer[i+3]  = 'T';
+  SDwriteBuffer[i+4]  = 'S';
+  SDwriteBuffer[i+5]  = 'R';
+  SDwriteBuffer[i+6]  = '_';
+  SDwriteBuffer[i+7]  = 'S';
+  SDwriteBuffer[i+8]  = 'I';
+  SDwriteBuffer[i+9]  = 'Z';
+  SDwriteBuffer[i+10] = 'E';
+  SDwriteBuffer[i+11] = '=';
+  SDwriteBuffer[i+12] = (HEADER_SIZE>>8) & 0xff;  //next 2 bytes are buffer Size
+  SDwriteBuffer[i+13] = (HEADER_SIZE>>0) & 0xff;
+  SDwriteBuffer[i+14] = '\r';
+  SDwriteBuffer[i+15] = '\n';
+  
+  i+=16;
+  if(i+16 > BUFFER_SIZE)
+  {
+    writeSingleBuffer(SDwriteBuffer, bw);
+    currentWriteLength+= BUFFER_SIZE;
+    for(i = 0; i < BUFFER_SIZE;i++)
+    {
+      SDwriteBuffer[i] = '0';
+    }
+    i = 0;
+  }
+  
+  SDwriteBuffer[i+0] = 'B';
+  SDwriteBuffer[i+1] = 'U';
+  SDwriteBuffer[i+2] = 'F';
+  SDwriteBuffer[i+3] = 'F';
+  SDwriteBuffer[i+4] = 'E';
+  SDwriteBuffer[i+5] = 'R';
+  SDwriteBuffer[i+6] = '_';
+  SDwriteBuffer[i+7] = 'S';
+  SDwriteBuffer[i+8] = 'I';
+  SDwriteBuffer[i+9] = 'Z';
+  SDwriteBuffer[i+10] = 'E';
+  SDwriteBuffer[i+11] = '=';
+  SDwriteBuffer[i+12] = (BUFFER_SIZE>>8) & 0xff;  //next 2 bytes are buffer Size
+  SDwriteBuffer[i+13] = (BUFFER_SIZE>>0) & 0xff;
+  SDwriteBuffer[i+14] = '\r';
+  SDwriteBuffer[i+15] = '\n';
+  
+  
+  
+  
+  i+=16;
+  if(i+16 > BUFFER_SIZE)
+  {
+    writeSingleBuffer(SDwriteBuffer, bw);
+    currentWriteLength+= BUFFER_SIZE;
+    for(i = 0; i < BUFFER_SIZE;i++)
+    {
+      SDwriteBuffer[i] = '0';
+    }
+    i = 0;
+  }
+  
+  SDwriteBuffer[i+0] = 'F';
+  SDwriteBuffer[i+1] = 'I';
+  SDwriteBuffer[i+2] = 'L';
+  SDwriteBuffer[i+3] = 'E';
+  SDwriteBuffer[i+4] = '_';
+  SDwriteBuffer[i+5] = 'U';
+  SDwriteBuffer[i+6] = 'S';
+  SDwriteBuffer[i+7] = 'E';
+  SDwriteBuffer[i+8] = 'D';
+  SDwriteBuffer[i+9] = '=';
+  SDwriteBuffer[i+10] = 'T';
+  SDwriteBuffer[i+11] = 'R';
+  SDwriteBuffer[i+12] = 'U';  //next 2 bytes are buffer Size
+  SDwriteBuffer[i+13] = 'E';
+  SDwriteBuffer[i+14] = '\r';
+  SDwriteBuffer[i+15] = '\n';
+  
+  
+  
+  
+  
+  
+  writeSingleBuffer(SDwriteBuffer, bw);
+  
+
+  //writes
+ 
     //quick ceiling calculation
-    SDwritePosition = (currentWriteLength +511) / 512;
-    SDwritePosition *= 512;
-    currentWriteLength = SDwritePosition;
+    //this should place
+    SDwritePosition = HEADER_SIZE;
+    currentWriteLength = HEADER_SIZE;
     
+    FatFsReturnChar = FatFs.write(0, 0, &bw);  //Finalize write
+    if (FatFsReturnChar) recover(FatFsReturnChar);
+    FatFsReturnChar = FatFs.close();  //Close file
+    if (FatFsReturnChar) recover(FatFsReturnChar);
+    isFileOpen = false;
     
-    
-    //recover(0);
+
 }
 void prepareADC()
 {
@@ -315,11 +454,17 @@ void loop()
   #endif
 
 }
-#if !WRITE_DEBUG
+void writeSingleBuffer(char *buffer, short unsigned int bw)
+{
+  char FatFsReturnChar = FatFs.write(buffer, BUFFER_SIZE,&bw);
+  if (FatFsReturnChar) recover(FatFsReturnChar+20);
+  currentWriteLength += BUFFER_SIZE;
+}
 void checkFile()
 {
   //TODO: Check for EOF, switch to next file if it is
 }
+#if !WRITE_DEBUG
 void dataWriteSequence()
 {
 #if DEBUG
@@ -335,7 +480,7 @@ void dataWriteSequence()
 #endif
 
 
-    FatFsReturnChar = FatFs.open(currentFileName);
+    FatFsReturnChar = FatFs.open(currentFilePath);
     if (FatFsReturnChar) recover(FatFsReturnChar);
     isFileOpen = true;
    // bw = 0;
@@ -345,7 +490,7 @@ void dataWriteSequence()
 
 
   memcpy(&SDwriteBuffer, (const char*)&writeBuffer[bufferNumber], BUFFER_SIZE);
-  SDwriteBuffer[0] = 'R';
+  //SDwriteBuffer[0] = 'R';
   
   
   //should help ensure false data not added, may cause issue with volatile data
