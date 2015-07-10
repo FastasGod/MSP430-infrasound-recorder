@@ -17,11 +17,11 @@
  1Hz blinking red ->  unrecovered error
  */
 //debug values
-#define DEBUG          true    //if it is false, can increase BUFFER_RAM to 256 and BUFFER_COUNT to 3, if true lower to (AT most) 192
+#define DEBUG          false   //if it is false, can increase BUFFER_RAM to 256 and BUFFER_COUNT to 3, if true lower to (AT most) 192
 #define WRITE_DEBUG    false
 #define TIMING_DEBUG   false
 #define INCLUDE_HEADER true
-#define READ_FROM_DIRECTORY true  //seems to cause RAM issues when true, keep false for most testing
+#define READ_FROM_DIRECTORY false  //seems to cause RAM issues when true, keep false for most testing
 //lower BUFFER_RAM to 96 while testing READ_FROM_DIRECTORY, raise to 196 when not testing 
 
 #define ACCESS_SD_CARD true //Just in case want to test things without SD card
@@ -36,14 +36,14 @@
 
 
 //currently assumes sample size is 2 bytes
-#define BUFFER_RAM 96 //MUST be divisible by (Size of each sample) * (BUFFER_COUNT+1) * BUFFER_SIZE
+#define BUFFER_RAM 192 //MUST be divisible by (Size of each sample) * (BUFFER_COUNT+1) * BUFFER_SIZE
 #define BUFFER_COUNT 2
 #define BUFFER_SIZE BUFFER_RAM/(BUFFER_COUNT+1)
 
 
-#define ADC_SAMPLE_FREQUENCY 500 //Measured in Hz
+#define ADC_SAMPLE_FREQUENCY 1000 //Measured in Hz
 
-#define NUM_SECTOR_WRITES 30 //This will have an affect on how frequentyly writes are finalized
+#define NUM_SECTOR_WRITES 20 //This will have an affect on how frequentyly writes are finalized
 //may be a data loss concern
 
 #define LOG_FILES_LOCATION "LOGFILES"
@@ -71,13 +71,14 @@ unsigned short int bw, br;//, i;
 long AccStringLength = 0;
 long fileSize = 0;
 
+#define FILE_PATH_SIZE 22
+char currentFilePath[FILE_PATH_SIZE] = "LOGFILES/LOG00000.TXT";
+ 
 #if READ_FROM_DIRECTORY
-  #define FILE_PATH_SIZE 22
-  char currentFilePath[FILE_PATH_SIZE];
   DIR directory;
-#else
-  char currentFilePath[13] = "LOG00000.TXT";
 #endif
+
+
 boolean collectData = false;
 
 #if TIMING_DEBUG
@@ -117,6 +118,9 @@ void setup()
 #if ACCESS_SD_CARD
   FatFs.begin(CS_PIN);
 
+
+
+//will likely want to move this into main loop
   #if READ_FROM_DIRECTORY
     getNextFile();
   #endif
@@ -144,79 +148,91 @@ void setup()
 
 }
 #if READ_FROM_DIRECTORY
-
-void getNextFile()
-{
-  //selects directory
-  //directory = 0;
-#if ACCESS_SD_CARD
-  
-  Serial.println("Open Directory");
-  char rc = FatFs.opendir(&directory,LOG_FILES_LOCATION);
-  if(rc) recover(rc+80);
-  FILINFO file;
-
-  rc = FatFs.readdir(&directory,&file);
-  if(rc) recover(rc+90);
-  
-  sprintf(currentFilePath,"%s/%s",LOG_FILES_LOCATION,file.fname);
-  Serial.println(currentFilePath);
-  
-  for(int i = 0; i < 7; i++)
+  void getNextFile()
   {
+    //selects directory
+    //directory = 0;
+  #if ACCESS_SD_CARD
+    
+    Serial.println("Open Directory");
+    char rc = FatFs.opendir(&directory,LOG_FILES_LOCATION);
+    if(rc) recover(rc+80);
+    FILINFO file;
+  
     rc = FatFs.readdir(&directory,&file);
     if(rc) recover(rc+90);
     
+    if(file.fname[0] == '\0')
+    {
+      recover(404);
+    }
+    
+    
     sprintf(currentFilePath,"%s/%s",LOG_FILES_LOCATION,file.fname);
     Serial.println(currentFilePath);
-  }
-#endif
+    
+    
+    for(int i = 0; i < 7; i++)
+    {
+      rc = FatFs.readdir(&directory,&file);
+      if(rc) recover(rc+90);
+      
+      sprintf(currentFilePath,"%s/%s",LOG_FILES_LOCATION,file.fname);
+      Serial.println(currentFilePath);
+    }
+    
+    fileSize = file.fsize;
+    Serial.println(fileSize);
+    
+    
+    
+  #endif
+    
   
-
-  //TODO: actually use the file.fname to rename currentFilePath
-  //copies file name to current File Name
-
-  //will later use this to change file name
-  /* JACOB TODO:
-   I am having trouble with the next bit of code
-   It should essentially be the same outside of the sketch, so you may
-   want to create your own sketch to test stuff
-   
-   what I need: 
-   1. I need to take a character arrayA of length 9
-   2. append a '/' character
-   3. append a character arrayB of length 13 to it
-   
-   ex:
-   arrayA = LOGFILES
-   arrayB = LOG00000.TXT
-   output LOGFILES/LOG00000.TXT
-   
-   //strcpy(currentFilePath, LOG_FILES_LOCATION);
-   //char forwardSlash[1] = {'/'};
-   //strcat(currentFilePath,(const char*)'////');
-   //strcat(currentFilePath,file.fname);
-   
-   
-   //memcpy(currentFilePath,tString,strlen(tString));
-   
-   
-   
-   
-   
-   
-   */
-
-  SDwritePosition = 0;
-  currentWriteLength = 0;
-
-
-
-#if DEBUG
-  Serial.println("Opening new file: ");
-  Serial.println(currentFilePath);
-#endif
-}
+    //TODO: actually use the file.fname to rename currentFilePath
+    //copies file name to current File Name
+  
+    //will later use this to change file name
+    /* JACOB TODO:
+     I am having trouble with the next bit of code
+     It should essentially be the same outside of the sketch, so you may
+     want to create your own sketch to test stuff
+     
+     what I need: 
+     1. I need to take a character arrayA of length 9
+     2. append a '/' character
+     3. append a character arrayB of length 13 to it
+     
+     ex:
+     arrayA = LOGFILES
+     arrayB = LOG00000.TXT
+     output LOGFILES/LOG00000.TXT
+     
+     //strcpy(currentFilePath, LOG_FILES_LOCATION);
+     //char forwardSlash[1] = {'/'};
+     //strcat(currentFilePath,(const char*)'////');
+     //strcat(currentFilePath,file.fname);
+     
+     
+     //memcpy(currentFilePath,tString,strlen(tString));
+     
+     
+     
+     
+     
+     
+     */
+  
+    SDwritePosition = 0;
+    currentWriteLength = 0;
+  
+  
+  
+  #if DEBUG
+    Serial.println("Opening new file: ");
+    Serial.println(currentFilePath);
+  #endif
+  }
 #endif  //READ_FROM_DIRECTORY
 void generateHeader()
 {
@@ -371,10 +387,8 @@ void generateHeader()
   SDwriteBuffer[i+9] = ' ';
   SDwriteBuffer[i+10] = ' ';
   SDwriteBuffer[i+11] = '=';
-  SDwriteBuffer[i+12] = (ADC_SAMPLE_FREQUENCY>>8) & 0xff;
-  ;  //next 2 bytes are buffer Size
+  SDwriteBuffer[i+12] = (ADC_SAMPLE_FREQUENCY>>8) & 0xff;//next 2 bytes are buffer Size
   SDwriteBuffer[i+13] = (ADC_SAMPLE_FREQUENCY) & 0xff;
-  ;
   SDwriteBuffer[i+14] = '\r';
   SDwriteBuffer[i+15] = '\n';
 
@@ -404,7 +418,7 @@ void prepareADC()
 #endif
 
   //Vcc,Gnd References, 8x sample and hold time, REFBURST, 
-  ADC10CTL0 = SREF_0 + ADC10SHT_1 + REFBURST + ADC10ON + ADC10IE;
+  ADC10CTL0 = SREF_0 + ADC10SHT_1 + ADC10SR + REFON+ ADC10ON + ADC10IE;
 
   //input is pin P1.1, clock divider is 4
   ADC10CTL1 = INCH_1 + ADC10DIV_3;
@@ -474,32 +488,28 @@ void loop()
     buttonShutoffSequence();
   }
 
-#if DEBUG
-  Serial.println("Enter Loop");
-#endif
+  #if DEBUG
+    Serial.println("Enter Loop");
+  #endif
 
   if(writeDataAvailable)
   {
-#if !WRITE_DEBUG
-    dataWriteSequence();
-#endif
-
-#if WRITE_DEBUG
-    testDataWriteSequence();
-#endif
-
-#if LIMITED_WRITES
-    limitedWritesCheck();
-#endif
-
-
-
-
-  }
-
-#if DEBUG
-  Serial.println("Exit Loop");
-#endif
+    #if !WRITE_DEBUG
+        dataWriteSequence();
+    #endif
+    
+    #if WRITE_DEBUG
+        testDataWriteSequence();
+    #endif
+    
+    #if LIMITED_WRITES
+        limitedWritesCheck();
+    #endif
+    }
+  
+    #if DEBUG
+      Serial.println("Exit Loop");
+    #endif
 
 }
 #if ACCESS_SD_CARD
@@ -514,9 +524,7 @@ void writeSingleBuffer(char *buffer, short unsigned int bw)
 #if ACCESS_SD_CARD
 void closeFile(short unsigned int bw)
 {
-  char FatFsReturnChar = FatFs.write(0, 0, &bw);  //Finalize write
-  if (FatFsReturnChar) recover(FatFsReturnChar);
-  FatFsReturnChar = FatFs.close();  //Close file
+  char FatFsReturnChar = FatFs.close();  //Close file
   if (FatFsReturnChar) recover(FatFsReturnChar);
   isFileOpen = false;
 }
@@ -548,11 +556,14 @@ void dataWriteSequence()
 #endif
 
 
-  memcpy(&SDwriteBuffer, (const char*)&writeBuffer[bufferNumber], BUFFER_SIZE);
+  memcpy(&SDwriteBuffer, (const char*)&writeBuffer[dataReadyBuffer], BUFFER_SIZE);
+  writeDataAvailable = false;
+  /*
   for(int i = 0; i < BUFFER_SIZE; i++)
   {
     SDwriteBuffer[i] = 'R';
   }
+  */
 
 
   //should help ensure false data not added, may cause issue with volatile data
@@ -585,18 +596,18 @@ void dataWriteSequence()
 
   if(currentWriteLength+BUFFER_SIZE > 512 * NUM_SECTOR_WRITES)
   {
-#if DEBUG
-    Serial.println("Close File");
-    delay(5);
-#endif
+    #if DEBUG
+        Serial.println("Close File");
+        delay(5);
+    #endif
     SDwritePosition =  SDwritePosition + 512*NUM_SECTOR_WRITES;
     currentWriteLength = 0;
 
 
 
-#if ACCESS_SD_CARD
-    closeFile(bw);
-#endif
+    #if ACCESS_SD_CARD
+        closeFile(bw);
+    #endif
   }
 }
 #endif
@@ -610,52 +621,74 @@ void buttonShutoffSequence()
   if (FatFsReturnChar) recover(FatFsReturnChar);
   recover(0);
 }
-void recover(byte errorVal)
+void shutOff(byte errorVal)
 {
-#if ACCESS_SD_CARD
-  FatFs.close();
-  collectData = false;
-  if(errorVal == 6)
-  {
-    //TODO: Recover from error code 6
-  }
-#endif
-  //TODO:
-  //eventually this should attempt to restart program
-  //may also handle closing files and such
   if(errorVal)
   {
     #if DEBUG
         Serial.print("\n\nError Detected, code: ");
-        Serial.print(errorVal);
+        Serial.println(errorVal);
+        switch(errorVal)
+        {
+          case 404:
+            Serial.print("File not found");
+            break;
+          case 6:
+            Serial.println("Card not detected");
+            break;
+          case 4:
+            Serial.println("Path not found");
+            break;
+          case 3:
+            Serial.println("File not found");
+            break;
+        }
     #endif
     for(;;)
     {
       //unrecovered error loop
+      //Blinks LED at 1 Hz
       P1OUT ^= BIT0;                      // Toggle P1.0 RED LED
       delay(500);
     }
   }
-
-
   else //error Value == 0
   {
-    P1OUT |= BIT0;                      // Toggle P1.6
-#if DEBUG
+    //RED LED becomes Solid
+    P1OUT |= BIT0;                      // Turn on P1.0 RED LED
+  #if DEBUG
     Serial.print("\n\nCode succesfully exited: ");
     Serial.print(errorVal);
-#endif
+  #endif
 
     for(;;)
     {
       //sucessful exit loop
-      P1OUT |= BIT0;                      // Toggle P1.6
       delay(2000);
     }
   }
 }
-
-
+void recover(byte errorVal)
+{
+#if ACCESS_SD_CARD
+  FatFs.close();
+#endif
+  collectData = false;
+  //This switch block is for recover attempts
+  //shutDown attempts handled seperatly
+  switch(errorVal)
+  {
+    case 6:
+      //TODO: recover from error code 6 
+      break;
+      
+      
+    default:
+      shutOff(errorVal);
+      break;
+      
+  }
+}
 
 void emptyBuffer(volatile char buffer[][BUFFER_SIZE],char column)
 {
@@ -723,7 +756,7 @@ __interrupt void Timer_A (void)
     /* taken from http://www.embeddedrelated.com/showarticle/199.php */
     ADC10CTL0 |= ENC + ADC10SC; // Sampling and conversion start
 
-    __bis_SR_register(CPUOFF + GIE); // LPM0 with interrupts enabled
+    //__bis_SR_register(CPUOFF + GIE); // LPM0 with interrupts enabled
 
     short input = ADC10MEM;
     /* end taken*/
@@ -747,7 +780,6 @@ __interrupt void Timer_A (void)
 
     bufferPosition += 2;
   }
-
 }
 
 
