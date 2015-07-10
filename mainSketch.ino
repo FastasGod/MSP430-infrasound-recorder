@@ -17,12 +17,13 @@
  1Hz blinking red ->  unrecovered error
  */
 //debug values
-#define DEBUG          true    //if it is false, can increase BUFFER_RAM to 256 and BUFFER_COUNT to 3
+#define DEBUG          false    //if it is false, can increase BUFFER_RAM to 256 and BUFFER_COUNT to 3, if true lower to (AT most) 192
 #define WRITE_DEBUG    false
 #define TIMING_DEBUG   false
 #define INCLUDE_HEADER true
-#define READ_FROM_DIRECTORY true  //seems to cause RAM issues when true, keep false for most testing
-//lower BUFFER_RAM to 96 while testing this, raise to 196 when not testing 
+#define READ_FROM_DIRECTORY false  //seems to cause RAM issues when true, keep false for most testing
+//lower BUFFER_RAM to 96 while testing READ_FROM_DIRECTORY, raise to 196 when not testing 
+#define ACCESS_SD_CARD true
 
 //Assigned Pins
 #define CS_PIN       8      //P1.6?      //MISO     also used by green LED
@@ -34,12 +35,12 @@
 
 
 //currently assumes sample size is 2 bytes
-#define BUFFER_RAM 96 //MUST be divisible by (Size of each sample) * (BUFFER_COUNT+1) * BUFFER_SIZE
+#define BUFFER_RAM 192 //MUST be divisible by (Size of each sample) * (BUFFER_COUNT+1) * BUFFER_SIZE
 #define BUFFER_COUNT 2
 #define BUFFER_SIZE BUFFER_RAM/(BUFFER_COUNT+1)
 
 
-#define ADC_SAMPLE_FREQUENCY 1 //Measured in KHz
+#define ADC_SAMPLE_FREQUENCY 200 //Measured in Hz
 
 #define FILE_PATH_SIZE 22
 #define NUM_SECTOR_WRITES 30 //This will have an affect on how frequentyly writes are finalized
@@ -82,15 +83,14 @@ long TTIME = 0;
 
 
 #if LIMITED_WRITES
-short tWriteCount = 0;
-#define SECONDS_TO_SAVE
+  short tWriteCount = 0;
+  #define SECONDS_TO_SAVE 1
 #endif
 
 
 //----BEGIN SETUP FUNCTIONSS-------------------------------
 void setup()
 {
-  //Serial.begin(9600);
 #if DEBUG + WRITE_DEBUG + TIMING_DEBUG + LIMITED_WRITES
   Serial.begin(9600);
 #endif
@@ -136,19 +136,21 @@ void setup()
 
   
 }
-//#if READ_FROM_DIRECTORY
+#if READ_FROM_DIRECTORY
 void getNextFile()
 {
   //selects directory
   //directory = 0;
-  DIR directory;
-  char rc = FatFs.opendir(&directory, LOG_FILES_LOCATION);
-  if(rc) recover(rc+80);
+  #if ACCESS_SD_CARD
+    DIR directory;
+    char rc = FatFs.opendir(&directory, LOG_FILES_LOCATION);
+    if(rc) recover(rc+80);
+    
+    FILINFO file;
   
-  FILINFO file;
-
-  rc = FatFs.readdir(&directory,&file);
-  if(rc) recover(rc+90);
+    rc = FatFs.readdir(&directory,&file);
+    if(rc) recover(rc+90);
+  #endif
   
   //TODO: actually use the file.fname to rename currentFilePath
   //copies file name to current File Name
@@ -203,7 +205,7 @@ void getNextFile()
     Serial.println(currentFilePath);
   #endif
 }
-//#endif  //READ_FROM_DIRECTORY
+#endif  //READ_FROM_DIRECTORY
 void generateHeader()
 {
   //Consider 16 byte segments
@@ -226,13 +228,14 @@ void generateHeader()
   
   int HEADER_SIZE = 512;
   
-  char FatFsReturnChar = FatFs.open(currentFilePath);
-  if (FatFsReturnChar) recover(FatFsReturnChar+100);
-  isFileOpen = true;
-  bw = 0;
-  FatFsReturnChar = FatFs.lseek(SDwritePosition);
-  if (FatFsReturnChar) recover(FatFsReturnChar+10);
-  
+  #if ACCESS_SD_CARD
+    char FatFsReturnChar = FatFs.open(currentFilePath);
+    if (FatFsReturnChar) recover(FatFsReturnChar+100);
+    isFileOpen = true;
+    bw = 0;
+    FatFsReturnChar = FatFs.lseek(SDwritePosition);
+    if (FatFsReturnChar) recover(FatFsReturnChar+10);
+  #endif
   
   
   
@@ -267,8 +270,10 @@ void generateHeader()
   i+=16;
   if(i+16 > BUFFER_SIZE)
   {
-    writeSingleBuffer(SDwriteBuffer, bw);
-    currentWriteLength+= BUFFER_SIZE;
+    #if ACCESS_SD_CARD
+      writeSingleBuffer(SDwriteBuffer, bw);
+      currentWriteLength+= BUFFER_SIZE;
+    #endif
     for(i = 0; i < BUFFER_SIZE;i++)
     {
       SDwriteBuffer[i] = '0';
@@ -299,8 +304,10 @@ void generateHeader()
   i+=16;
   if(i+16 > BUFFER_SIZE)
   {
-    writeSingleBuffer(SDwriteBuffer, bw);
-    currentWriteLength+= BUFFER_SIZE;
+    #if ACCESS_SD_CARD
+      writeSingleBuffer(SDwriteBuffer, bw);
+      currentWriteLength+= BUFFER_SIZE;
+    #endif
     for(i = 0; i < BUFFER_SIZE;i++)
     {
       SDwriteBuffer[i] = '0';
@@ -329,9 +336,9 @@ void generateHeader()
   
   
   
-  
-  writeSingleBuffer(SDwriteBuffer, bw);
-  
+  #if ACCESS_SD_CARD
+    writeSingleBuffer(SDwriteBuffer, bw);
+  #endif
 
   //writes
  
@@ -340,11 +347,9 @@ void generateHeader()
     SDwritePosition = HEADER_SIZE;
     currentWriteLength = HEADER_SIZE;
     
-    FatFsReturnChar = FatFs.write(0, 0, &bw);  //Finalize write
-    if (FatFsReturnChar) recover(FatFsReturnChar);
-    FatFsReturnChar = FatFs.close();  //Close file
-    if (FatFsReturnChar) recover(FatFsReturnChar);
-    isFileOpen = false;
+    #if ACCESS_SD_CARD
+      closeFile(bw);
+    #endif
     
 
 }
@@ -375,7 +380,7 @@ void prepareADCTimer()
 
   TACCTL0 = CCIE;                             // CCR0 interrupt enabled
   TACTL = TASSEL_2 + MC_1 + ID_3;           // SMCLK/8, upmode
-  TACCR0 =  2000. / ADC_SAMPLE_FREQUENCY;                          // 16MHz / 8 / 1000 = 2KHz
+  TACCR0 =  2000000. / ADC_SAMPLE_FREQUENCY;                          // 16MHz / 8 / 1000 = 2KHz
 
 }
 
@@ -443,7 +448,6 @@ void loop()
       limitedWritesCheck();
     #endif
     
-    checkFile();   //not implemented, will handle switching files when appropriate
     
     
     
@@ -454,17 +458,27 @@ void loop()
   #endif
 
 }
+#if ACCESS_SD_CARD
 void writeSingleBuffer(char *buffer, short unsigned int bw)
 {
   char FatFsReturnChar = FatFs.write(buffer, BUFFER_SIZE,&bw);
   if (FatFsReturnChar) recover(FatFsReturnChar+20);
   currentWriteLength += BUFFER_SIZE;
 }
-void checkFile()
+#endif //ACCESS_SD_CARD
+
+#if ACCESS_SD_CARD
+void closeFile(short unsigned int bw)
 {
-  //TODO: Check for EOF, switch to next file if it is
+      char FatFsReturnChar = FatFs.write(0, 0, &bw);  //Finalize write
+      if (FatFsReturnChar) recover(FatFsReturnChar);
+      FatFsReturnChar = FatFs.close();  //Close file
+      if (FatFsReturnChar) recover(FatFsReturnChar);
+      isFileOpen = false;
 }
-#if !WRITE_DEBUG
+#endif //ACCESS_SD_CARD
+
+#if !WRITE_DEBUG  //THis is the usual write program
 void dataWriteSequence()
 {
 #if DEBUG
@@ -479,7 +493,7 @@ void dataWriteSequence()
     delay(5);
 #endif
 
-
+#if ACCESS_SD_CARD
     FatFsReturnChar = FatFs.open(currentFilePath);
     if (FatFsReturnChar) recover(FatFsReturnChar);
     isFileOpen = true;
@@ -487,6 +501,7 @@ void dataWriteSequence()
     FatFsReturnChar = FatFs.lseek(SDwritePosition);
     if (FatFsReturnChar) recover(FatFsReturnChar+10);
   }
+#endif
 
 
   memcpy(&SDwriteBuffer, (const char*)&writeBuffer[bufferNumber], BUFFER_SIZE);
@@ -510,11 +525,15 @@ void dataWriteSequence()
   delay(5);
 #endif
 
+#if ACCESS_SD_CARD   //consider changing to singleBufferWrite
 
+  writeSingleBuffer(SDwriteBuffer,bw);
+  /*
   FatFsReturnChar = FatFs.write(SDwriteBuffer, BUFFER_SIZE,&bw);
   if (FatFsReturnChar) recover(FatFsReturnChar+20);
   writeDataAvailable = false;
-  currentWriteLength += BUFFER_SIZE;
+  currentWriteLength += BUFFER_SIZE;*/
+#endif
 
 
   if(currentWriteLength+BUFFER_SIZE > 512 * NUM_SECTOR_WRITES)
@@ -525,11 +544,12 @@ void dataWriteSequence()
   #endif
     SDwritePosition =  SDwritePosition + 512*NUM_SECTOR_WRITES;
     currentWriteLength = 0;
-    FatFsReturnChar = FatFs.write(0, 0, &bw);  //Finalize write
-    if (FatFsReturnChar) recover(FatFsReturnChar+30);
-    FatFsReturnChar = FatFs.close();  //Close file
-    if (FatFsReturnChar) recover(FatFsReturnChar+40);
-    isFileOpen = false;
+    
+    
+    
+    #if ACCESS_SD_CARD
+      closeFile(bw);
+    #endif
   }
 }
 #endif
@@ -545,36 +565,14 @@ void buttonShutoffSequence()
 }
 void recover(byte errorVal)
 {
-  FatFs.close();
-  collectData = false;
+  #if ACCESS_SD_CARD
+    FatFs.close();
+    collectData = false;
   if(errorVal == 6)
   {
-    char errorCount = 0;
-    /*
-    while(errorVal == 6 && errorCount < 10)
-     {
-     FatFs.close();
-     delay(20);
-     FatFs.begin(CS_PIN);
-     delay(20);
-     errorVal = FatFs.open(currentFileName);
-     
-     //escape when file set up
-     if(errorVal == 0)
-     {
-     collectData = true;
-     return;
-     }
-     errorCount++;
-     #if DEBUG
-     Serial.println("Caught in errorVAl loop");
-     #endif
-     delay(1000);
-     }*/
+    //TODO: Recover from error code 6
   }
-  //FatFs.close();  //Close file
-
-  collectData = false;
+  #endif
   //TODO:
   //eventually this should attempt to restart program
   //may also handle closing files and such
@@ -631,18 +629,21 @@ void testDataWriteSequence()
 
   char buf[] = "Best";
   char rc;
-  rc = FatFs.open("TESTLOG.TXT");
-  if (rc) recover(rc);
-  rc = FatFs.lseek(  AccStringLength );
-  if (rc) recover(rc);
-  AccStringLength =  AccStringLength + 512;
-  int StringLength =  strlen(buf);
-  rc = FatFs.write(buf, StringLength,&bw);
-  if (rc) recover(rc);
-  rc = FatFs.write(0, 0, &bw);  //Finalize write
-  if (rc) recover(rc);
-  rc = FatFs.close();  //Close file
-  if (rc) recover(rc);
+  
+  #if ACCESS_SD_CARD
+    rc = FatFs.open("TESTLOG.TXT");
+    if (rc) recover(rc);
+    rc = FatFs.lseek(  AccStringLength );
+    if (rc) recover(rc);
+    AccStringLength =  AccStringLength + 512;
+    int StringLength =  strlen(buf);
+    rc = FatFs.write(buf, StringLength,&bw);
+    if (rc) recover(rc);
+    rc = FatFs.write(0, 0, &bw);  //Finalize write
+    if (rc) recover(rc);
+    rc = FatFs.close();  //Close file
+    if (rc) recover(rc);
+  #endif
 }
 #endif
 
@@ -680,7 +681,7 @@ __interrupt void Timer_A (void)
     short input = ADC10MEM;
     /* end taken*/
 
-    if(bufferPosition +2 > BUFFER_SIZE)      //bufferPosition + 1 > BUFFER_SIZE - 1, this would put a value out of range
+    if(bufferPosition  > BUFFER_SIZE-2)      //bufferPosition + 1 > BUFFER_SIZE - 1, this would put a value out of range
     {
       writeDataAvailable = true;
       dataReadyBuffer = bufferNumber;
