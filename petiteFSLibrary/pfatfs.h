@@ -71,6 +71,7 @@ class PFFS
     
 	FRESULT mount (FATFS*);						/* Mount/Unmount a logical drive */
 	FRESULT open (const char*);					/* Open a file */
+	int getFileSize(void);
 #if _USE_READ
 	FRESULT read (void*, WORD, WORD*);			/* Read data from the open file */
 #endif	

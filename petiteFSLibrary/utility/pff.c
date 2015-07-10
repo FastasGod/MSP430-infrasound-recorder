@@ -734,6 +734,34 @@ BYTE check_fs (	/* 0:The FAT boot record, 1:Valid boot record but not an FAT, 2:
 
 
 /*-----------------------------------------------------------------------*/
+/* Return File Size      (Samuel B.)                                     */
+/*-----------------------------------------------------------------------*/
+
+FRESULT pf_getFileSize (
+	const char *path	/* Pointer to the file name */
+)
+{
+	FRESULT res;
+	DIR dj;
+	BYTE sp[12], dir[32];
+	FATFS *fs = FatFs;
+
+
+	if (!fs)						/* Check file system */
+		return FR_NOT_ENABLED;
+
+	fs->flag = 0;
+	dj.fn = sp;
+	res = follow_path(&dj, dir, path);	/* Follow the file path */
+	if (res != FR_OK) return res;		/* Follow failed */
+	if (!dir[0] || (dir[DIR_Attr] & AM_DIR))	/* It is a directory */
+		return FR_NO_FILE;
+
+	return LD_DWORD(dir+DIR_FileSize);
+}
+
+
+/*-----------------------------------------------------------------------*/
 /* Mount/Unmount a Locical Drive                                         */
 /*-----------------------------------------------------------------------*/
 

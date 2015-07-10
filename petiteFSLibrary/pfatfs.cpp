@@ -6,7 +6,7 @@
  * http://elm-chan.org/fsw/ff/00index_e.html
  */
 
-#include "pfatfs.h"
+#include "pfatfsEdited.h"
 
 extern "C" {
 #include "utility/diskio.h"
@@ -261,6 +261,16 @@ FRESULT PFFS::mount (
 	SPI_SET_DIVIDER(_clkdivider);
 	return res;
 }
+
+/*-----------------------------------------------------------------------*/
+/* Return size of file (Samuel B.)                                       */
+/*-----------------------------------------------------------------------*/
+int PFFS::getFileSize()
+{
+	return fs->fsize;
+}
+
+
 
 
 /*-----------------------------------------------------------------------*/
