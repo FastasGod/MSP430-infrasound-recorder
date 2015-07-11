@@ -36,9 +36,10 @@
 
 
 //currently assumes sample size is 2 bytes
-#define BUFFER_RAM 192 //MUST be divisible by (Size of each sample) * (BUFFER_COUNT+1) * BUFFER_SIZE
+#define BUFFER_RAM 150 //MUST be divisible by (Size of each sample) * (BUFFER_COUNT+1) * BUFFER_SIZE
 #define BUFFER_COUNT 2
 #define BUFFER_SIZE BUFFER_RAM/(BUFFER_COUNT+1)
+#define HEADER_SIZE 512
 
 
 #define ADC_SAMPLE_FREQUENCY 1000 //Measured in Hz
@@ -66,10 +67,10 @@ char readyBuffers[BUFFER_COUNT] = {0};
 char currentFile = 0;
 boolean isFileOpen = false;
 String fileName;
-long currentWriteLength = 0;
+unsigned long currentWriteLength = 0;
 unsigned short int bw, br;//, i;
 long AccStringLength = 0;
-long fileSize = 0;
+unsigned long fileSize = 0;
 
 #define FILE_PATH_SIZE 22
 char currentFilePath[FILE_PATH_SIZE] = "LOGFILES/LOG00000.TXT";
@@ -123,6 +124,8 @@ void setup()
 //will likely want to move this into main loop
   #if READ_FROM_DIRECTORY
     getNextFile();
+  #else
+    fileSize = 1000448;
   #endif
   
   #if INCLUDE_HEADER
@@ -145,7 +148,6 @@ void setup()
 #endif
 
 
-
 }
 #if READ_FROM_DIRECTORY
   void getNextFile()
@@ -153,8 +155,9 @@ void setup()
     //selects directory
     //directory = 0;
   #if ACCESS_SD_CARD
-    
-    Serial.println("Open Directory");
+    #if DEBUG
+      Serial.println("Open Directory");
+    #endif
     char rc = FatFs.opendir(&directory,LOG_FILES_LOCATION);
     if(rc) recover(rc+80);
     FILINFO file;
@@ -167,70 +170,40 @@ void setup()
       recover(404);
     }
     
-    
+    //still need to implement a read from file segment to check if file is used
     sprintf(currentFilePath,"%s/%s",LOG_FILES_LOCATION,file.fname);
-    Serial.println(currentFilePath);
+    fileSize = file.fsize;
+    
+    SDwritePosition = 0;
+    currentWriteLength = 0;
     
     
+    
+    #if DEBUG
+      Serial.println(currentFilePath);
+    #endif
+    
+    /* opens 7 files and displays names
     for(int i = 0; i < 7; i++)
     {
       rc = FatFs.readdir(&directory,&file);
       if(rc) recover(rc+90);
       
       sprintf(currentFilePath,"%s/%s",LOG_FILES_LOCATION,file.fname);
-      Serial.println(currentFilePath);
-    }
-    
-    fileSize = file.fsize;
-    Serial.println(fileSize);
-    
-    
-    
+      #if DEBUG
+        Serial.println(currentFilePath);
+      #endif
+    }*/
   #endif
-    
   
-    //TODO: actually use the file.fname to rename currentFilePath
-    //copies file name to current File Name
-  
-    //will later use this to change file name
-    /* JACOB TODO:
-     I am having trouble with the next bit of code
-     It should essentially be the same outside of the sketch, so you may
-     want to create your own sketch to test stuff
-     
-     what I need: 
-     1. I need to take a character arrayA of length 9
-     2. append a '/' character
-     3. append a character arrayB of length 13 to it
-     
-     ex:
-     arrayA = LOGFILES
-     arrayB = LOG00000.TXT
-     output LOGFILES/LOG00000.TXT
-     
-     //strcpy(currentFilePath, LOG_FILES_LOCATION);
-     //char forwardSlash[1] = {'/'};
-     //strcat(currentFilePath,(const char*)'////');
-     //strcat(currentFilePath,file.fname);
-     
-     
-     //memcpy(currentFilePath,tString,strlen(tString));
-     
-     
-     
-     
-     
-     
-     */
-  
-    SDwritePosition = 0;
-    currentWriteLength = 0;
   
   
   
   #if DEBUG
     Serial.println("Opening new file: ");
     Serial.println(currentFilePath);
+    Serial.println("File size:");
+    Serial.println(fileSize);
   #endif
   }
 #endif  //READ_FROM_DIRECTORY
@@ -238,8 +211,10 @@ void generateHeader()
 {
   //Consider 16 byte segments
   /* FORMAT:
+   FILE_USED  =TT
    HEADER_SIZE= 2 bytes
    BUFFER_SIZE= 2 bytes
+   ADC__RATE   =2 bytes
    
    
    
@@ -254,7 +229,6 @@ void generateHeader()
 
 
 
-  int HEADER_SIZE = 512;
 
 #if ACCESS_SD_CARD
   char FatFsReturnChar = FatFs.open(currentFilePath);
@@ -273,76 +247,11 @@ void generateHeader()
   {
     for(i = 0; i < BUFFER_SIZE;i++)
     {
-      SDwriteBuffer[i] = '0';
+      SDwriteBuffer[i] = '\0';
     }
   }
 
   //there is almost certainly a better way to do this, probably with strings
-  SDwriteBuffer[i+0]  = 'B';
-  SDwriteBuffer[i+1]  = 'U';
-  SDwriteBuffer[i+2]  = 'Y';
-  SDwriteBuffer[i+3]  = 'T';
-  SDwriteBuffer[i+4]  = 'S';
-  SDwriteBuffer[i+5]  = 'R';
-  SDwriteBuffer[i+6]  = '_';
-  SDwriteBuffer[i+7]  = 'S';
-  SDwriteBuffer[i+8]  = 'I';
-  SDwriteBuffer[i+9]  = 'Z';
-  SDwriteBuffer[i+10] = 'E';
-  SDwriteBuffer[i+11] = '=';
-  SDwriteBuffer[i+12] = (HEADER_SIZE>>8) & 0xff;  //next 2 bytes are buffer Size
-  SDwriteBuffer[i+13] = (HEADER_SIZE>>0) & 0xff;
-  SDwriteBuffer[i+14] = '\r';
-  SDwriteBuffer[i+15] = '\n';
-
-  i+=16;
-  if(i+16 > BUFFER_SIZE)
-  {
-#if ACCESS_SD_CARD
-    writeSingleBuffer(SDwriteBuffer, bw);
-    currentWriteLength+= BUFFER_SIZE;
-#endif
-    for(i = 0; i < BUFFER_SIZE;i++)
-    {
-      SDwriteBuffer[i] = '0';
-    }
-    i = 0;
-  }
-
-  SDwriteBuffer[i+0] = 'B';
-  SDwriteBuffer[i+1] = 'U';
-  SDwriteBuffer[i+2] = 'F';
-  SDwriteBuffer[i+3] = 'F';
-  SDwriteBuffer[i+4] = 'E';
-  SDwriteBuffer[i+5] = 'R';
-  SDwriteBuffer[i+6] = '_';
-  SDwriteBuffer[i+7] = 'S';
-  SDwriteBuffer[i+8] = 'I';
-  SDwriteBuffer[i+9] = 'Z';
-  SDwriteBuffer[i+10] = 'E';
-  SDwriteBuffer[i+11] = '=';
-  SDwriteBuffer[i+12] = (BUFFER_SIZE>>8) & 0xff;  //next 2 bytes are buffer Size
-  SDwriteBuffer[i+13] = (BUFFER_SIZE>>0) & 0xff;
-  SDwriteBuffer[i+14] = '\r';
-  SDwriteBuffer[i+15] = '\n';
-
-
-
-
-  i+=16;
-  if(i+16 > BUFFER_SIZE)
-  {
-#if ACCESS_SD_CARD
-    writeSingleBuffer(SDwriteBuffer, bw);
-    currentWriteLength+= BUFFER_SIZE;
-#endif
-    for(i = 0; i < BUFFER_SIZE;i++)
-    {
-      SDwriteBuffer[i] = '0';
-    }
-    i = 0;
-  }
-
   SDwriteBuffer[i+0] = 'F';
   SDwriteBuffer[i+1] = 'I';
   SDwriteBuffer[i+2] = 'L';
@@ -359,6 +268,71 @@ void generateHeader()
   SDwriteBuffer[i+13] = 'T';
   SDwriteBuffer[i+14] = '\r';
   SDwriteBuffer[i+15] = '\n';
+
+  i+=16;
+  if(i+16 > BUFFER_SIZE)
+  {
+#if ACCESS_SD_CARD
+    writeSingleBuffer(SDwriteBuffer, bw);
+    currentWriteLength+= BUFFER_SIZE;
+#endif
+    for(i = 0; i < BUFFER_SIZE;i++)
+    {
+      SDwriteBuffer[i] = '\0';
+    }
+    i = 0;
+  }
+  SDwriteBuffer[i+0]  = 'H';
+  SDwriteBuffer[i+1]  = 'E';
+  SDwriteBuffer[i+2]  = 'A';
+  SDwriteBuffer[i+3]  = 'D';
+  SDwriteBuffer[i+4]  = 'E';
+  SDwriteBuffer[i+5]  = 'R';
+  SDwriteBuffer[i+6]  = '_';
+  SDwriteBuffer[i+7]  = 'S';
+  SDwriteBuffer[i+8]  = 'I';
+  SDwriteBuffer[i+9]  = 'Z';
+  SDwriteBuffer[i+10] = 'E';
+  SDwriteBuffer[i+11] = '=';
+  SDwriteBuffer[i+12] = (HEADER_SIZE>>8) & 0xff;  //next 2 bytes are buffer Size
+  SDwriteBuffer[i+13] = (HEADER_SIZE>>0) & 0xff;
+  SDwriteBuffer[i+14] = '\r';
+  SDwriteBuffer[i+15] = '\n';
+
+
+
+
+  i+=16;
+  if(i+16 > BUFFER_SIZE)
+  {
+    #if ACCESS_SD_CARD
+        writeSingleBuffer(SDwriteBuffer, bw);
+        currentWriteLength+= BUFFER_SIZE;
+    #endif
+    for(i = 0; i < BUFFER_SIZE;i++)
+    {
+      SDwriteBuffer[i] = '\0';
+    }
+    i = 0;
+  }
+  SDwriteBuffer[i+0] = 'B';
+  SDwriteBuffer[i+1] = 'U';
+  SDwriteBuffer[i+2] = 'F';
+  SDwriteBuffer[i+3] = 'F';
+  SDwriteBuffer[i+4] = 'E';
+  SDwriteBuffer[i+5] = 'R';
+  SDwriteBuffer[i+6] = '_';
+  SDwriteBuffer[i+7] = 'S';
+  SDwriteBuffer[i+8] = 'I';
+  SDwriteBuffer[i+9] = 'Z';
+  SDwriteBuffer[i+10] = 'E';
+  SDwriteBuffer[i+11] = '=';
+  SDwriteBuffer[i+12] = (BUFFER_SIZE>>8) & 0xff;  //next 2 bytes are buffer Size
+  SDwriteBuffer[i+13] = (BUFFER_SIZE>>0) & 0xff;
+  SDwriteBuffer[i+14] = '\r';
+  SDwriteBuffer[i+15] = '\n';
+  
+
 
 
   i+=16;
@@ -592,8 +566,15 @@ void dataWriteSequence()
    writeDataAvailable = false;
    currentWriteLength += BUFFER_SIZE;*/
 #endif
-
-
+  if(SDwritePosition + currentWriteLength + BUFFER_SIZE >= fileSize)
+  {
+    //TODO: check implementation of getNextFile
+    #if READ_FROM_DIRECTORY  
+      getNextFile();
+    #else
+      recover(0);
+    #endif
+  }
   if(currentWriteLength+BUFFER_SIZE > 512 * NUM_SECTOR_WRITES)
   {
     #if DEBUG
