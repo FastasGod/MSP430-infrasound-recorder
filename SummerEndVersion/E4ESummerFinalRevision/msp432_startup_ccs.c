@@ -89,8 +89,8 @@ void (* const interruptVectors[])(void) =
     defaultISR,                             /* FLCTL ISR                 */
     defaultISR,                             /* COMP0 ISR                 */
     defaultISR,                             /* COMP1 ISR                 */
-	defaultISR,                             /* TA0_0 ISR                 */
-  	Timer_A0_N,                             /* TA0_N ISR                 */
+    defaultISR,                             /* TA0_0 ISR                 */
+    Timer_A0_N,                             /* TA0_N ISR                 */
     defaultISR,                             /* TA1_0 ISR                 */
     defaultISR,                             /* TA1_N ISR                 */
     defaultISR,                             /* TA2_0 ISR                 */
